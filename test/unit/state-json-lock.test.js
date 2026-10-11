@@ -56,6 +56,27 @@ test("serializes work with account lock and releases the lock file", async () =>
   });
 });
 
+test("reclaims a stale lock left by a dead process instead of timing out", async () => {
+  await withTempDir(async (stateDir) => {
+    const lockPath = path.join(stateDir, "accounts", "account-1.lock");
+    await import("node:fs/promises").then((fs) => fs.mkdir(path.dirname(lockPath), { recursive: true }));
+    // Simulate a kill -9'd holder: lock file with a pid that does not exist.
+    await writeFile(
+      lockPath,
+      JSON.stringify({ pid: 2147483647, accountId: "account-1", createdAt: new Date().toISOString() }),
+      "utf8"
+    );
+
+    const lock = await acquireAccountLock(stateDir, "account-1", { timeoutMs: 2000, retryDelayMs: 5 });
+    try {
+      assert.equal(await pathExists(lockPath), true);
+    } finally {
+      await lock.release();
+    }
+    assert.equal(await pathExists(lockPath), false);
+  });
+});
+
 test("returns STATE_LOCK_TIMEOUT when a lock is already held", async () => {
   await withTempDir(async (stateDir) => {
     const lock = await acquireAccountLock(stateDir, "account-1", { timeoutMs: 20, retryDelayMs: 5 });
