@@ -283,10 +283,7 @@ function buildMediaItem({ kind, local, encryptedBytes, aesKeyHex, downloadParam 
         media: {
           ...buildCdnMedia({ downloadParam, aesKeyHex })
         },
-        file_name: local.fileName,
-        md5: local.rawMd5,
-        len: String(local.rawSize),
-        duration: local.durationMs ?? 0
+        playtime: local.durationMs ?? 0
       }
     };
   }
