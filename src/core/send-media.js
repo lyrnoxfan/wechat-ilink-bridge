@@ -1,6 +1,9 @@
 import { createCipheriv, createHash, randomBytes } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import path from "node:path";
+import os from "node:os";
 import { WxbError } from "./errors.js";
 import { generateClientId, IlinkClient } from "./ilink-client.js";
 import { outgoingItemTypes, protocolDefaults, uploadMediaTypes } from "./protocol-constants.js";
@@ -45,6 +48,41 @@ const mimeByExtension = Object.freeze({
 
 function inferMimeType(filePath) {
   return mimeByExtension[path.extname(filePath).toLowerCase()];
+}
+
+const execFileAsync = promisify(execFile);
+const SILK_ENCODER = "/home/hatch/workspace/silk-tools/encoder";
+
+async function getAudioDurationMs(filePath) {
+  try {
+    const { stdout } = await execFileAsync("ffprobe", [
+      "-v", "error", "-show_entries", "format=duration",
+      "-of", "default=noprint_wrappers=1:nokey=1", filePath
+    ]);
+    const secs = parseFloat(stdout.trim());
+    return Number.isFinite(secs) ? Math.round(secs * 1000) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function convertToSilk(inputPath) {
+  const tmpPcm = path.join(os.tmpdir(), `silk-${Date.now()}-${Math.random().toString(36).slice(2)}.pcm`);
+  const tmpSilk = path.join(os.tmpdir(), `silk-${Date.now()}-${Math.random().toString(36).slice(2)}.silk`);
+  try {
+    await execFileAsync("ffmpeg", ["-y", "-loglevel", "error", "-i", inputPath, "-ar", "24000", "-ac", "1", "-f", "s16le", tmpPcm]);
+    await execFileAsync(SILK_ENCODER, [tmpPcm, tmpSilk, "-rate", "24000"]);
+    const bytes = await readFile(tmpSilk);
+    return bytes;
+  } finally {
+    await unlink(tmpPcm).catch(() => {});
+    await unlink(tmpSilk).catch(() => {});
+  }
+}
+
+function isSilkFile(filePath, bytes) {
+  if (path.extname(filePath).toLowerCase() === ".silk") return true;
+  return bytes.length > 10 && bytes.subarray(0, 10).toString("latin1").includes("SILK");
 }
 
 function md5Hex(buffer) {
@@ -177,13 +215,27 @@ async function inspectLocalMedia(filePath, kind, config = {}) {
   }
 
   const bytes = await readFile(absolutePath);
+
+  // Voice messages must be SILK format for WeChat; convert if needed
+  let finalBytes = bytes;
+  let finalFileName = sanitizeAttachmentFileName(path.basename(absolutePath));
+  let durationMs = 0;
+  if (kind === "voice") {
+    durationMs = await getAudioDurationMs(absolutePath);
+    if (!isSilkFile(absolutePath, bytes)) {
+      finalBytes = await convertToSilk(absolutePath);
+      finalFileName = finalFileName.replace(/\.[^.]+$/, "") + ".silk";
+    }
+  }
+
   return {
     path: absolutePath,
-    bytes,
-    rawSize: bytes.length,
-    rawMd5: md5Hex(bytes),
-    fileName: sanitizeAttachmentFileName(path.basename(absolutePath)),
-    mimeType
+    bytes: finalBytes,
+    rawSize: finalBytes.length,
+    rawMd5: md5Hex(finalBytes),
+    fileName: finalFileName,
+    mimeType: kind === "voice" ? "audio/silk" : mimeType,
+    durationMs
   };
 }
 
@@ -233,7 +285,8 @@ function buildMediaItem({ kind, local, encryptedBytes, aesKeyHex, downloadParam 
         },
         file_name: local.fileName,
         md5: local.rawMd5,
-        len: String(local.rawSize)
+        len: String(local.rawSize),
+        duration: local.durationMs ?? 0
       }
     };
   }
