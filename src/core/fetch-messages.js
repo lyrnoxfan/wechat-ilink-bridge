@@ -126,14 +126,20 @@ export async function fetchMessages(options = {}) {
     channelVersion: config.channelVersion
   });
 
-  return withAccountLock(stateDir, account.accountId, async () => {
-    const previousBuffer = await readSyncBuffer(stateDir, account.accountId);
-    const { response, attempts } = await getUpdatesWithRetry(client, {
-      token: account.token,
-      getUpdatesBuf: previousBuffer,
-      timeoutMs
-    }, retry);
+  // 2026-10-23: 锁只保护短暂的状态读写，长轮询（20s 网络等待）不再持锁。
+  // 之前整段持锁，轮询期间并发的 send 会报 STATE_LOCK_TIMEOUT 被迫重试。
+  // 单轮询器部署下不会有两个 fetch 并发，游标不会错乱。
+  const previousBuffer = await withAccountLock(stateDir, account.accountId, () =>
+    readSyncBuffer(stateDir, account.accountId)
+  );
 
+  const { response, attempts } = await getUpdatesWithRetry(client, {
+    token: account.token,
+    getUpdatesBuf: previousBuffer,
+    timeoutMs
+  }, retry);
+
+  return withAccountLock(stateDir, account.accountId, async () => {
     const normalized = normalizeUpdateResponse(response, {
       includeContextToken: true,
       includeMediaSecrets: downloadMedia
