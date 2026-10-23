@@ -52,14 +52,15 @@ export async function runSendCommand(argv, context) {
   const wantsStdin = flags.stdin === true;
   const filePath = flags.file === true ? undefined : flags.file;
   const imagePath = flags.image === true ? undefined : flags.image;
-  const mediaSources = [filePath ? "file" : undefined, imagePath ? "image" : undefined].filter(Boolean);
+  const voicePath = flags.voice === true ? undefined : flags.voice;
+  const mediaSources = [filePath ? "file" : undefined, imagePath ? "image" : undefined, voicePath ? "voice" : undefined].filter(Boolean);
 
-  const sourceCount = [hasTextFlag, wantsStdin, Boolean(filePath), Boolean(imagePath)]
+  const sourceCount = [hasTextFlag, wantsStdin, Boolean(filePath), Boolean(imagePath), Boolean(voicePath)]
     .filter(Boolean)
     .length;
 
   if (sourceCount > 1) {
-    throw new WxbError("SEND_SOURCE_AMBIGUOUS", "Use only one of --text, --stdin, --file, or --image.", {
+    throw new WxbError("SEND_SOURCE_AMBIGUOUS", "Use only one of --text, --stdin, --file, --image, or --voice.", {
       retryable: false
     });
   }
@@ -70,7 +71,7 @@ export async function runSendCommand(argv, context) {
       accountId: flags.account === true ? undefined : flags.account,
       userId,
       alias,
-      filePath: filePath ?? imagePath,
+      filePath: filePath ?? imagePath ?? voicePath,
       kind: mediaSources[0],
       config: context.config,
       timeoutMs: optionalNumber(flags.timeout) ?? context.config.fetchTimeoutMs,
@@ -82,7 +83,7 @@ export async function runSendCommand(argv, context) {
   }
 
   if (!hasTextFlag && !wantsStdin && positionals.length < (alias ? 1 : 2)) {
-    throw new WxbError("SEND_SOURCE_REQUIRED", "Use --text, --stdin, --file, or --image.", {
+    throw new WxbError("SEND_SOURCE_REQUIRED", "Use --text, --stdin, --file, --image, or --voice.", {
       retryable: false
     });
   }

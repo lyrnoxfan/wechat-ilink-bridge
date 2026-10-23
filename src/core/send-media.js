@@ -13,7 +13,8 @@ import { withAccountLock } from "../state/lock.js";
 
 const mediaTypeByKind = Object.freeze({
   image: uploadMediaTypes.image,
-  file: uploadMediaTypes.file
+  file: uploadMediaTypes.file,
+  voice: uploadMediaTypes.voice
 });
 
 const mimeByExtension = Object.freeze({
@@ -33,7 +34,13 @@ const mimeByExtension = Object.freeze({
   ".xls": "application/vnd.ms-excel",
   ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   ".ppt": "application/vnd.ms-powerpoint",
-  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".m4a": "audio/mp4",
+  ".amr": "audio/amr",
+  ".ogg": "audio/ogg",
+  ".silk": "audio/silk"
 });
 
 function inferMimeType(filePath) {
@@ -217,6 +224,20 @@ function buildMediaItem({ kind, local, encryptedBytes, aesKeyHex, downloadParam 
     };
   }
 
+  if (kind === "voice") {
+    return {
+      type: outgoingItemTypes.voice,
+      voice_item: {
+        media: {
+          ...buildCdnMedia({ downloadParam, aesKeyHex })
+        },
+        file_name: local.fileName,
+        md5: local.rawMd5,
+        len: String(local.rawSize)
+      }
+    };
+  }
+
   return {
     type: outgoingItemTypes.file,
     file_item: {
@@ -247,8 +268,8 @@ export async function sendMedia(options = {}) {
     throw new TypeError("stateDir is required");
   }
 
-  if (!["file", "image"].includes(kind)) {
-    throw new WxbError("MEDIA_KIND_UNSUPPORTED", "Only file and image sends are supported.", {
+  if (!["file", "image", "voice"].includes(kind)) {
+    throw new WxbError("MEDIA_KIND_UNSUPPORTED", "Only file, image and voice sends are supported.", {
       retryable: false,
       details: { kind }
     });
